@@ -17,14 +17,14 @@ async def scrape_table(page):
         tds = await tr.query_selector_all("td")
         if len(tds) < 2:
             continue
-        pos        = (await tds[0].inner_text()).strip()
-        name       = (await tds[1].inner_text()).strip()
-        r1         = (await tds[2].inner_text()).strip() if len(tds) > 2 else ""
-        r2         = (await tds[3].inner_text()).strip() if len(tds) > 3 else ""
-        r3         = (await tds[4].inner_text()).strip() if len(tds) > 4 else ""
-        r4         = (await tds[5].inner_text()).strip() if len(tds) > 5 else ""
-        total_score= (await tds[6].inner_text()).strip() if len(tds) > 6 else ""
-        total_par  = (await tds[7].inner_text()).strip() if len(tds) > 7 else ""
+        pos         = (await tds[0].inner_text()).strip()
+        name        = (await tds[1].inner_text()).strip()
+        r1          = (await tds[2].inner_text()).strip() if len(tds) > 2 else ""
+        r2          = (await tds[3].inner_text()).strip() if len(tds) > 3 else ""
+        r3          = (await tds[4].inner_text()).strip() if len(tds) > 4 else ""
+        r4          = (await tds[5].inner_text()).strip() if len(tds) > 5 else ""
+        total_score = (await tds[6].inner_text()).strip() if len(tds) > 6 else ""
+        total_par   = (await tds[7].inner_text()).strip() if len(tds) > 7 else ""
         if name:
             rows.append({
                 "Pos": pos,
@@ -37,35 +37,6 @@ async def scrape_table(page):
                 "Total Par": total_par,
             })
     return rows
-
-
-async def scrape_year(page, era_selector, year_str):
-    """Open dropdown, click era, click specific year, return scraped rows."""
-    await page.keyboard.press("Escape")
-    await page.wait_for_timeout(300)
-
-    await page.click(".tournament-year-select")
-    await page.wait_for_timeout(1000)
-
-    await page.click(era_selector, force=True)
-    await page.wait_for_timeout(500)
-
-    year_lis = await page.query_selector_all("div.nav.show .year-list li")
-    clicked = False
-    for li in year_lis:
-        if (await li.inner_text()).strip() == year_str:
-            await li.evaluate("el => el.click()")
-            clicked = True
-            break
-
-    if not clicked:
-        print(f"    Could not find {year_str} in dropdown.")
-        return []
-
-    await page.wait_for_selector(".winners-table tbody tr", timeout=10000)
-    await page.wait_for_timeout(500)
-
-    return await scrape_table(page)
 
 
 async def scrape_masters_players():
@@ -111,44 +82,21 @@ async def scrape_masters_players():
         except:
             pass
 
-        # ── Pre-scrape first year of each era ────────────────────────────────
-
-        print("  Scraping 2025 (default page load)...")
-        await page.wait_for_selector(".winners-table tbody tr", timeout=10000)
-        for row in await scrape_table(page):
-            row["Year"] = 2025
-            all_rows.append(row)
-
-        print("  Scraping 1995 (first load of era tab)...")
-        await page.click(".tournament-year-select")
-        await page.wait_for_timeout(1000)
-        await page.click(".yearNav > li:nth-child(2)", force=True)
-        await page.wait_for_timeout(1000)
-        await page.wait_for_selector(".winners-table tbody tr", timeout=10000)
-        for row in await scrape_table(page):
-            row["Year"] = 1995
-            all_rows.append(row)
-
-        print("  Scraping 1965 (first load of era tab)...")
-        await page.click(".tournament-year-select")
-        await page.wait_for_timeout(1000)
-        await page.click(".yearNav > li:nth-child(3)", force=True)
-        await page.wait_for_timeout(1000)
-        await page.wait_for_selector(".winners-table tbody tr", timeout=10000)
-        for row in await scrape_table(page):
-            row["Year"] = 1965
-            all_rows.append(row)
-
-        # ── Main era loop ─────────────────────────────────────────────────────
+        # ── Era loop ──────────────────────────────────────────────────────────
+        # For each era: open the dropdown, click the era tab to get its year
+        # list, close without loading anything, then iterate every year —
+        # clicking it fresh each time so the table is always up to date.
 
         eras = [
-            (".yearNav > li:nth-child(1)", "2025-1996", 1),
-            (".yearNav > li:nth-child(2)", "1995-1966", 1),
-            (".yearNav > li:nth-child(3)", "1965-1934", 1),
+            (".yearNav > li:nth-child(1)", "2025-1996"),
+            (".yearNav > li:nth-child(2)", "1995-1966"),
+            (".yearNav > li:nth-child(3)", "1965-1934"),
         ]
 
-        for era_selector, era_label, skip_count in eras:
+        for era_selector, era_label in eras:
+            print(f"\nEra {era_label}: collecting year list...")
 
+            # Open dropdown and click era just to read its year list
             await page.click(".tournament-year-select")
             await page.wait_for_timeout(1000)
             await page.click(era_selector, force=True)
@@ -161,18 +109,18 @@ async def scrape_masters_players():
                 if text.isdigit():
                     years.append(text)
 
-            years = years[skip_count:]
+            # Close dropdown without triggering a table load
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(300)
+
             print(f"Era {era_label}: scraping {len(years)} years: {years}")
 
             for year in years:
                 print(f"  Scraping {year}...")
 
-                await page.keyboard.press("Escape")
-                await page.wait_for_timeout(300)
-
+                # Re-open dropdown, click era, then click the specific year
                 await page.click(".tournament-year-select")
                 await page.wait_for_timeout(1000)
-
                 await page.click(era_selector, force=True)
                 await page.wait_for_timeout(500)
 
@@ -195,25 +143,6 @@ async def scrape_masters_players():
                     row["Year"] = int(year)
                     all_rows.append(row)
 
-        # ── Cleanup: grab the 3 stubbornly skipped years ─────────────────────
-
-        missing = [
-            ("2024", ".yearNav > li:nth-child(1)"),
-            ("1994", ".yearNav > li:nth-child(2)"),
-            ("1964", ".yearNav > li:nth-child(3)"),
-        ]
-
-        for year_str, era_selector in missing:
-            print(f"  Cleanup: scraping {year_str}...")
-            rows = await scrape_year(page, era_selector, year_str)
-            if rows:
-                for row in rows:
-                    row["Year"] = int(year_str)
-                    all_rows.append(row)
-                print(f"    Got {len(rows)} players for {year_str}.")
-            else:
-                print(f"    Still could not scrape {year_str}.")
-
         await browser.close()
 
     masters_players_df = pd.DataFrame(all_rows, columns=[
@@ -228,7 +157,15 @@ async def scrape_masters_players():
 
 async def main():
     df = await scrape_masters_players()
+
     output_path = "C:\\Personal Projects\\masters_players.csv"
+    try:
+        existing = pd.read_csv(output_path)
+        df = pd.concat([existing, df]).drop_duplicates().reset_index(drop=True)
+        print(f"Merged with existing CSV — {len(df)} total records after dedup.")
+    except FileNotFoundError:
+        pass
+
     df.to_csv(output_path, index=False)
     print(f"\nSaved to {output_path}")
     return df
@@ -239,6 +176,32 @@ if __name__ == "__main__":
 
 
 
+CSV_PATH = "C:\\Personal Projects\\masters_players.csv"
 
+df = pd.read_csv(CSV_PATH)
+print(f"Rows before cleanup: {len(df)}")
 
+# Get the set of player+score combinations that belong to 2025
+players_2025 = df[df['Year'] == 2025][['Name', 'R1', 'R2', 'R3', 'R4']].drop_duplicates()
 
+# For 1995 and 1965, flag any row whose Name+R1-R4 matches a 2025 row
+contaminated_years = [1995, 1965]
+mask_bad = (
+    df['Year'].isin(contaminated_years) &
+    df[['Name', 'R1', 'R2', 'R3', 'R4']].apply(tuple, axis=1).isin(
+        players_2025.apply(tuple, axis=1)
+    )
+)
+
+print(f"Removing {mask_bad.sum()} contaminated rows "
+      f"({mask_bad[df['Year']==1995].sum()} from 1995, "
+      f"{mask_bad[df['Year']==1965].sum()} from 1965)")
+
+df_clean = df[~mask_bad].reset_index(drop=True)
+print(f"Rows after cleanup: {len(df_clean)}")
+print()
+print("Year counts after cleanup:")
+print(df_clean[df_clean['Year'].isin([2025, 1995, 1965])].groupby('Year').size())
+
+df_clean.to_csv(CSV_PATH, index=False)
+print(f"\nSaved cleaned CSV to {CSV_PATH}")
